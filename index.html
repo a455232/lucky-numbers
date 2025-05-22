@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lucky Numbers</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #setupScreen, #gameUI { margin-bottom: 20px; }
+    .player-section {
+      border: 1px solid #ccc; padding: 10px; margin-bottom: 10px;
+      max-width: 300px; display: inline-block; vertical-align: top;
+    }
+    .player-section.inactive { opacity: 0.5; }
+    .board {
+      display: grid; grid-template-columns: repeat(4, 40px);
+      grid-template-rows: repeat(4, 40px); gap: 4px; margin-top: 10px;
+    }
+    .cell {
+      width: 40px; height: 40px; border: 1px solid #888;
+      display: flex; justify-content: center; align-items: center;
+      cursor: pointer; user-select: none; background-color: #f9f9f9;
+      font-weight: bold; font-size: 18px;
+    }
+    .cell:hover { background-color: #def; }
+    #publicPile {
+      margin-top: 10px; border: 1px solid #aaa; padding: 5px;
+      min-height: 50px; display: flex; gap: 5px; flex-wrap: wrap;
+      max-width: 320px;
+    }
+    .public-card {
+      width: 40px; height: 40px; background-color: #ffa;
+      border: 1px solid #cc9; display: flex; justify-content: center;
+      align-items: center; font-weight: bold; font-size: 18px;
+      user-select: none; cursor: pointer;
+    }
+    button {
+      margin: 5px 5px 5px 0; padding: 6px 12px; font-size: 14px;
+    }
+    #drawnNumberDisplay { margin-top: 10px; font-weight: bold; }
+    input.name-input {
+      font-size: 14px; margin-bottom: 5px; padding: 2px; width: 95%;
+    }
+  </style>
+</head>
+<body>
+
+<div id="setupScreen">
+  <h2>Lucky Numbers - 遊戲設定</h2>
+  <label>玩家人數：
+    <select id="numPlayers">
+      <option value="1">1</option>
+      <option value="2" selected>2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+    </select>
+  </label>
+  <span id="aiOption" style="margin-left:10px;">
+    <label>對手為 AI：
+      <select id="vsAI">
+        <option value="true">是</option>
+        <option value="false" selected>否</option>
+      </select>
+    </label>
+  </span>
+  <br/><br/>
+  <button onclick="startGame()">開始遊戲</button>
+  <button onclick="loadGame()">讀取存檔</button>
+</div>
+
+<div id="gameUI" style="display:none;">
+  <h3>目前輪到：<span id="currentPlayerLabel"></span></h3>
+  <div id="playersBoards"></div>
+  <div>
+    <button onclick="drawFromDeck()">抽牌</button>
+    <button onclick="placeInPublic()">丟入公開棄牌區</button>
+    <button onclick="undo()">回復上一步</button>
+    <button onclick="saveGame()">存檔</button>
+  </div>
+  <div id="drawnNumberDisplay"></div>
+  <h4>公開棄牌區（點擊可拿牌）</h4>
+  <div id="publicPile"></div>
+</div>
+
+<script>
+  document.getElementById('numPlayers').addEventListener('change', (e) => {
+    const showAIOption = e.target.value === '2';
+    document.getElementById('aiOption').style.display = showAIOption ? 'inline' : 'none';
+  });
+
+  let gameHistory = [];
+
+  function startGame() {
+    const numPlayers = parseInt(document.getElementById('numPlayers').value);
+    const vsAI = document.getElementById('vsAI').value === 'true';
+    window.luckyConfig = { numPlayers, vsAI };
+    document.getElementById('setupScreen').style.display = 'none';
+    document.getElementById('gameUI').style.display = 'block';
+    initGame(numPlayers);
+  }
+
+  function initGame(numPlayers) {
+    const allNumbers = [];
+    for (let i = 1; i <= 20; i++) {
+      for (let j = 0; j < numPlayers; j++) {
+        allNumbers.push(i);
+      }
+    }
+    shuffleArray(allNumbers);
+    window.deck = allNumbers;
+    window.publicPile = [];
+    window.players = [];
+    window.currentPlayer = 0;
+    window.drawnCard = undefined;
+    gameHistory = [];
+    for (let i = 0; i < numPlayers; i++) {
+      const board = Array(4).fill(null).map(() => Array(4).fill(null));
+      players.push({ board, name: 玩家 ${i + 1} }); // ⭐ 加入 name 欄位
+    }
+    saveGameState();
+    renderBoards();
+    updateCurrentPlayerLabel();
+    renderPublicPile();
+  }
+
+  function saveGameState() {
+    gameHistory.push(JSON.stringify({
+      players, currentPlayer, deck, publicPile, drawnCard: window.drawnCard
+    }));
+  }
+
+  function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+  }
+
+  function renderBoards() {
+    const container = document.getElementById('playersBoards');
+    container.innerHTML = '';
+    players.forEach((player, index) => {
+      const section = document.createElement('div');
+      section.className = 'player-section';
+      if (index !== currentPlayer) section.classList.add('inactive');
+
+      // ⭐ 名稱編輯欄
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'name-input';
+      nameInput.value = player.name;
+      nameInput.oninput = (e) => {
+        player.name = e.target.value;
+        if (index === currentPlayer) updateCurrentPlayerLabel();
+      };
+      section.appendChild(nameInput);
+
+      const boardDiv = document.createElement('div');
+      boardDiv.className = 'board';
+      player.board.forEach((row, rowIndex) => {
+        row.forEach((cell, colIndex) => {
+          const cellDiv = document.createElement('div');
+          cellDiv.className = 'cell';
+          cellDiv.textContent = cell !== null ? cell : '';
+          if (index === currentPlayer && window.drawnCard !== undefined) {
+            cellDiv.onclick = () => placeInCell(rowIndex, colIndex);
+          }
+          boardDiv.appendChild(cellDiv);
+        });
+      });
+      section.appendChild(boardDiv);
+      container.appendChild(section);
+    });
+  }
+
+  function updateCurrentPlayerLabel() {
+    document.getElementById('currentPlayerLabel').textContent = players[currentPlayer].name;
+  }
+
+  function drawFromDeck() {
+    if (window.drawnCard !== undefined) return alert("你手上已有牌，請先放置或丟棄。");
+    if (deck.length === 0) return alert("牌堆已空！");
+    const card = deck.pop();
+    window.drawnCard = card;
+    document.getElementById('drawnNumberDisplay').textContent = 你抽到：${card};
+    saveGameState();
+    renderBoards();
+  }
+
+  function renderPublicPile() {
+    const div = document.getElementById('publicPile');
+    div.innerHTML = '';
+    publicPile.forEach((num, idx) => {
+      const card = document.createElement('div');
+      card.className = 'public-card';
+      card.textContent = num;
+      if (window.drawnCard === undefined && currentPlayer === window.currentPlayer) {
+        card.onclick = () => {
+          window.drawnCard = num;
+          publicPile.splice(idx, 1);
+          renderPublicPile();
+          document.getElementById('drawnNumberDisplay').textContent = 你拿取了：${num};
+          saveGameState();
+          renderBoards();
+        };
+      } else {
+        card.style.cursor = 'not-allowed';
+        card.style.opacity = 0.5;
+      }
+      div.appendChild(card);
+    });
+  }
+
+  function placeInCell(row, col) {
+    if (window.drawnCard === undefined) return alert("請先抽牌或拿牌！");
+    const board = players[currentPlayer].board;
+    const replaced = board[row][col];
+    if (replaced !== null) publicPile.push(replaced);
+    board[row][col] = window.drawnCard;
+    window.drawnCard = undefined;
+    document.getElementById('drawnNumberDisplay').textContent = '';
+    renderBoards();
+    nextTurn();
+  }
+
+  function placeInPublic() {
+    if (window.drawnCard === undefined) return alert("沒有牌可丟！");
+    publicPile.push(window.drawnCard);
+    window.drawnCard = undefined;
+    document.getElementById('drawnNumberDisplay').textContent = '';
+    renderPublicPile();
+    nextTurn();
+  }
+
+  function nextTurn() {
+    currentPlayer = (currentPlayer + 1) % players.length;
+    updateCurrentPlayerLabel();
+    renderBoards();
+    renderPublicPile();
+  }
+
+  function saveGame() {
+    const state = {
+      players, currentPlayer, deck, publicPile,
+      drawnCard: window.drawnCard || null,
+    };
+    localStorage.setItem('luckyGameSave', JSON.stringify(state));
+    alert("遊戲已存檔！");
+  }
+
+  function loadGame() {
+    const state = JSON.parse(localStorage.getItem('luckyGameSave'));
+    if (!state) return alert("找不到存檔！");
+    players = state.players;
+    currentPlayer = state.currentPlayer;
+    deck = state.deck;
+    publicPile = state.publicPile;
+    window.drawnCard = state.drawnCard;
+    document.getElementById('setupScreen').style.display = 'none';
+    document.getElementById('gameUI').style.display = 'block';
+    renderBoards();
+    renderPublicPile();
+    updateCurrentPlayerLabel();
+    document.getElementById('drawnNumberDisplay').textContent =
+      window.drawnCard !== undefined && window.drawnCard !== null
+        ? 你抽到：${window.drawnCard} : '';
+  }
+
+  function undo() {
+    if (gameHistory.length <= 1) return alert("無法回復！");
+    gameHistory.pop();
+    const last = JSON.parse(gameHistory[gameHistory.length - 1]);
+    players = last.players;
+    currentPlayer = last.currentPlayer;
+    deck = last.deck;
+    publicPile = last.publicPile;
+    window.drawnCard = last.drawnCard;
+    renderBoards();
+    renderPublicPile();
+    updateCurrentPlayerLabel();
+    document.getElementById('drawnNumberDisplay').textContent =
+      window.drawnCard !== undefined && window.drawnCard !== null
+        ? 你抽到：${window.drawnCard} : '';
+  }
+</script>
+</body>
+</html>
